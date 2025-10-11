@@ -1,6 +1,7 @@
 package podtypes
 
 import (
+	host "github.com/kartverket/skiperator/api/v1beta1/podtypes"
 	corev1 "k8s.io/api/core/v1"
 )
 
@@ -28,4 +29,11 @@ type ResourceRequirements struct {
 	//
 	//+kubebuilder:validation:Optional
 	Requests corev1.ResourceList `json:"requests,omitempty"`
+}
+
+func (src *ResourceRequirements) toHost() *host.ResourceRequirements {
+	return &host.ResourceRequirements{
+		Limits:   src.Limits,
+		Requests: src.Requests,
+	}
 }

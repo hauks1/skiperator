@@ -3,6 +3,7 @@ package podtypes
 import (
 	"fmt"
 
+	host "github.com/kartverket/skiperator/api/v1beta1/podtypes"
 	v1 "k8s.io/api/networking/v1"
 )
 
@@ -28,6 +29,13 @@ type AccessPolicy struct {
 	Outbound *OutboundPolicy `json:"outbound,omitempty"`
 }
 
+func (src *AccessPolicy) toHost() *host.AccessPolicy {
+	return &host.AccessPolicy{
+		Inbound:  src.Inbound.toHost(),
+		Outbound: src.Outbound.toHost(),
+	}
+}
+
 // InboundPolicy
 //
 // +kubebuilder:object:generate=true
@@ -38,6 +46,19 @@ type InboundPolicy struct {
 	//
 	//+kubebuilder:validation:Required
 	Rules []InternalRule `json:"rules"`
+}
+
+func (src *InboundPolicy) toHost() *host.InboundPolicy {
+	if src == nil {
+		return nil
+	}
+	rules := make([]host.InternalRule, len(src.Rules))
+	for i, rule := range src.Rules {
+		rules[i] = rule.toHost()
+	}
+	return &host.InboundPolicy{
+		Rules: rules,
+	}
 }
 
 // OutboundPolicy
@@ -59,6 +80,24 @@ type OutboundPolicy struct {
 	//
 	//+kubebuilder:validation:Optional
 	External []ExternalRule `json:"external,omitempty"`
+}
+
+func (src *OutboundPolicy) toHost() *host.OutboundPolicy {
+	if src == nil {
+		return nil
+	}
+	rules := make([]host.InternalRule, len(src.Rules))
+	for i, rule := range src.Rules {
+		rules[i] = rule.toHost()
+	}
+	external := make([]host.ExternalRule, len(src.External))
+	for i, ext := range src.External {
+		external[i] = ext.toHost()
+	}
+	return &host.OutboundPolicy{
+		Rules:    rules,
+		External: external,
+	}
 }
 
 // InternalRule
@@ -87,6 +126,15 @@ type InternalRule struct {
 	Ports []v1.NetworkPolicyPort `json:"ports,omitempty"`
 }
 
+func (src *InternalRule) toHost() host.InternalRule {
+	return host.InternalRule{
+		Application:       src.Application,
+		Namespace:         src.Namespace,
+		NamespacesByLabel: src.NamespacesByLabel,
+		Ports:             src.Ports,
+	}
+}
+
 // ExternalRule
 //
 // Describes a rule for allowing your Application to route traffic to external applications and hosts.
@@ -113,6 +161,18 @@ type ExternalRule struct {
 	Ports []ExternalPort `json:"ports,omitempty"`
 }
 
+func (src *ExternalRule) toHost() host.ExternalRule {
+	ports := make([]host.ExternalPort, len(src.Ports))
+	for i, port := range src.Ports {
+		ports[i] = port.toHost()
+	}
+	return host.ExternalRule{
+		Host:  src.Host,
+		Ip:    src.Ip,
+		Ports: ports,
+	}
+}
+
 // ExternalPort
 //
 // A custom port describing an external host
@@ -132,6 +192,14 @@ type ExternalPort struct {
 	//+kubebuilder:validation:Required
 	// +kubebuilder:validation:Enum=HTTP;HTTPS;TCP;TLS
 	Protocol string `json:"protocol"`
+}
+
+func (src *ExternalPort) toHost() host.ExternalPort {
+	return host.ExternalPort{
+		Name:     src.Name,
+		Port:     src.Port,
+		Protocol: src.Protocol,
+	}
 }
 
 func (internalRule *InternalRule) ToPrincipal(applicationNamespace string) string {

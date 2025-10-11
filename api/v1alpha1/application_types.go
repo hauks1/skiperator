@@ -6,9 +6,10 @@ import (
 	"time"
 
 	"github.com/kartverket/skiperator/api/v1alpha1/digdirator"
-
 	"github.com/kartverket/skiperator/api/v1alpha1/istiotypes"
+
 	"github.com/kartverket/skiperator/api/v1alpha1/podtypes"
+	host "github.com/kartverket/skiperator/api/v1beta1"
 	corev1 "k8s.io/api/core/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -345,6 +346,15 @@ type PrometheusConfig struct {
 	//+kubebuilder:validation:XValidation:rule="self == '' || self.matches('^([0-9]+[sm])+$')",messageExpression="'Rejected: ' + self + ' as an invalid value. ScrapeInterval must be empty (default applies) or in the format of <number>s or <number>m.'"
 	//+kubebuilder:validation:XValidation:rule="self == '' || (self.endsWith('m') && int(self.split('m')[0]) >= 1) || (self.endsWith('s') && int(self.split('s')[0]) >= 15 && int(self.split('s')[0]) % 5 == 0)",messageExpression="'Rejected: ' + self + ' as an invalid value. ScrapeInterval must be at least 15s (if using <s>) and divisible by 5, or at least 1m (if using <m>).'"
 	ScrapeInterval string `json:"scrapeInterval,omitempty"`
+}
+
+func (src *PrometheusConfig) toHost() *host.PrometheusConfig {
+	return &host.PrometheusConfig{
+		Port:            src.Port,
+		Path:            src.Path,
+		AllowAllMetrics: src.AllowAllMetrics,
+		ScrapeInterval:  src.ScrapeInterval,
+	}
 }
 
 func NewDefaultReplicas() Replicas {

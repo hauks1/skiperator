@@ -1,5 +1,7 @@
 package podtypes
 
+import host "github.com/kartverket/skiperator/api/v1beta1/podtypes"
+
 // PodSettings
 //
 // +kubebuilder:object:generate=true
@@ -22,4 +24,12 @@ type PodSettings struct {
 	//+kubebuilder:validation:Optional
 	//+kubebuilder:default:=false
 	DisablePodSpreadTopologyConstraints bool `json:"disablePodSpreadTopologyConstraints,omitempty"`
+}
+
+func (src *PodSettings) toHost() *host.PodSettings {
+	return &host.PodSettings{
+		Annotations:                         src.Annotations,
+		TerminationGracePeriodSeconds:       src.TerminationGracePeriodSeconds,
+		DisablePodSpreadTopologyConstraints: src.DisablePodSpreadTopologyConstraints,
+	}
 }

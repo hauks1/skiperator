@@ -1,6 +1,7 @@
 package v1alpha1
 
 import (
+	host "github.com/kartverket/skiperator/api/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -17,6 +18,26 @@ type SkiperatorStatus struct {
 	AccessPolicies StatusNames `json:"accessPolicies"`
 }
 
+func (src *SkiperatorStatus) toHost() host.SkiperatorStatus {
+	// Convert SubResources map
+	var subRes map[string]host.Status
+	if len(src.SubResources) > 0 {
+		subRes = make(map[string]host.Status, len(src.SubResources))
+		for k, v := range src.SubResources {
+			subRes[k] = v.toHost()
+		}
+	} else {
+		subRes = map[string]host.Status{}
+	}
+
+	return host.SkiperatorStatus{
+		Summary:        src.Summary.toHost(),
+		SubResources:   subRes,
+		Conditions:     append([]metav1.Condition(nil), src.Conditions...), // copy to avoid aliasing
+		AccessPolicies: host.StatusNames(src.AccessPolicies),
+	}
+}
+
 // Status
 //
 // +kubebuilder:object:generate=true
@@ -27,6 +48,14 @@ type Status struct {
 	Message string `json:"message"`
 	// +kubebuilder:default="hello"
 	TimeStamp string `json:"timestamp"`
+}
+
+func (s Status) toHost() host.Status {
+	return host.Status{
+		Status:    host.StatusNames(s.Status),
+		Message:   s.Message,
+		TimeStamp: s.TimeStamp,
+	}
 }
 
 type StatusNames string

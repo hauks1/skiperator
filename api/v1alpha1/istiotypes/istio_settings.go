@@ -4,6 +4,7 @@
 package istiotypes
 
 import (
+	host "github.com/kartverket/skiperator/api/v1beta1/istiotypes"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 )
@@ -23,6 +24,12 @@ type Tracing struct {
 	RandomSamplingPercentage int `json:"randomSamplingPercentage,omitempty"`
 }
 
+func (src *Tracing) toHost() *host.Tracing {
+	return &host.Tracing{
+		RandomSamplingPercentage: src.RandomSamplingPercentage,
+	}
+}
+
 // Telemetry is a placeholder for all relevant telemetry types, and may be extended in the future to configure additional telemetry settings.
 //
 // +kubebuilder:object:generate=true
@@ -31,6 +38,20 @@ type Telemetry struct {
 	// +kubebuilder:validation:Optional
 	// +kubebuilder:default:={{randomSamplingPercentage: 10}}
 	Tracing []*Tracing `json:"tracing,omitempty"`
+}
+
+func (src *Telemetry) toHost() host.Telemetry {
+	var dst host.Telemetry
+	if src == nil || len(src.Tracing) == 0 {
+		return dst
+	}
+	dst.Tracing = make([]*host.Tracing, len(src.Tracing))
+	for i, t := range src.Tracing {
+		if t != nil {
+			dst.Tracing[i] = t.toHost()
+		}
+	}
+	return dst
 }
 
 // Retries is configurable automatic retries for requests towards the application.
@@ -59,6 +80,14 @@ type Retries struct {
 	RetryOnHttpResponseCodes *[]intstr.IntOrString `json:"retryOnHttpResponseCodes,omitempty"`
 }
 
+func (src *Retries) toHost() *host.Retries {
+	return &host.Retries{
+		Attempts:                 src.Attempts,
+		PerTryTimeout:            src.PerTryTimeout,
+		RetryOnHttpResponseCodes: src.RetryOnHttpResponseCodes,
+	}
+}
+
 // IstioSettings contains configuration settings for istio resources. Currently only telemetry configuration is supported.
 //
 // +kubebuilder:object:generate=true
@@ -66,6 +95,12 @@ type IstioSettingsBase struct {
 	// +kubebuilder:validation:Optional
 	// +kubebuilder:default:={tracing: {{randomSamplingPercentage: 10}}}
 	Telemetry Telemetry `json:"telemetry,omitempty"`
+}
+
+func (src *IstioSettingsBase) toHost() *host.IstioSettingsBase {
+	return &host.IstioSettingsBase{
+		Telemetry: src.Telemetry.toHost(),
+	}
 }
 
 // IstioSettingsApplication contains configuration settings for istio resources for applications.
@@ -76,4 +111,10 @@ type IstioSettingsApplication struct {
 
 	// +kubebuilder:validation:Optional
 	Retries *Retries `json:"retries,omitempty"`
+}
+
+func (src *IstioSettingsApplication) toHost() host.IstioSettingsApplication {
+	return host.IstioSettingsApplication{
+		Retries: src.Retries.toHost(),
+	}
 }

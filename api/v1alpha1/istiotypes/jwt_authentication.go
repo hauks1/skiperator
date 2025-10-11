@@ -1,5 +1,7 @@
 package istiotypes
 
+import host "github.com/kartverket/skiperator/api/v1beta1/istiotypes"
+
 // RequestAuthentication specifies how incoming JWTs should be validated.
 //
 // +kubebuilder:object:generate=true
@@ -57,6 +59,24 @@ type RequestAuthentication struct {
 	IgnorePaths *[]string `json:"ignorePaths,omitempty"`
 }
 
+func (src RequestAuthentication) toHost() host.RequestAuthentication {
+	var dst host.RequestAuthentication
+	dst.Enabled = src.Enabled
+	dst.SecretName = src.SecretName
+	dst.ForwardJwt = src.ForwardJwt
+	dst.TokenLocation = src.TokenLocation
+	dst.Paths = src.Paths
+	dst.IgnorePaths = src.IgnorePaths
+
+	out := make([]host.ClaimToHeader, len(*src.OutputClaimToHeaders))
+	for i, o := range *src.OutputClaimToHeaders {
+		out[i] = o.toHost()
+	}
+	dst.OutputClaimToHeaders = &out
+
+	return dst
+}
+
 type ClaimToHeader struct {
 	// The name of the HTTP header for which the specified claim will be copied to.
 	// +kubebuilder:validation:Pattern="^[a-zA-Z0-9-]+$"
@@ -67,4 +87,11 @@ type ClaimToHeader struct {
 	// +kubebuilder:validation:Pattern="^[a-zA-Z0-9-._]+$"
 	// +kubebuilder:validation:MaxLength=128
 	Claim string `json:"claim"`
+}
+
+func (src ClaimToHeader) toHost() host.ClaimToHeader {
+	return host.ClaimToHeader{
+		Header: src.Header,
+		Claim:  src.Claim,
+	}
 }

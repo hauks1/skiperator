@@ -7,6 +7,7 @@ import (
 
 	"github.com/kartverket/skiperator/api/v1alpha1/istiotypes"
 	"github.com/kartverket/skiperator/api/v1alpha1/podtypes"
+	host "github.com/kartverket/skiperator/api/v1beta1"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -31,6 +32,12 @@ type SKIPJobStatus struct {
 	Conditions []metav1.Condition `json:"conditions"`
 }
 
+func (src *SKIPJobStatus) toHost() host.SKIPJobStatus {
+	return host.SKIPJobStatus{
+		Conditions: src.Conditions,
+	}
+}
+
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:object:generate=true
@@ -47,6 +54,13 @@ type SKIPJob struct {
 
 	//+kubebuilder:validation:Optional
 	Status SkiperatorStatus `json:"status,omitempty"`
+}
+
+func (src *SKIPJob) toHost() *host.SKIPJob {
+	return &host.SKIPJob{
+		Spec:   src.Spec.toHost(),
+		Status: *src.Status.toHost(),
+	}
 }
 
 //+kubebuilder:object:root=true
@@ -93,6 +107,63 @@ type SKIPJobSpec struct {
 	// Prometheus settings for pod running in job. Fields are identical to Application and if set,
 	// a podmonitoring object is created.
 	Prometheus *PrometheusConfig `json:"prometheus,omitempty"`
+}
+
+func (src *SKIPJobSpec) toHost() host.SKIPJobSpec {
+	// Convert EnvFrom slice
+	var envFrom []host.EnvFrom
+	if len(src.Container.EnvFrom) > 0 {
+		envFrom = make([]host.EnvFrom, len(src.Container.EnvFrom))
+		for i, ef := range src.Container.EnvFrom {
+			if converted := ef.toHost(); converted != nil {
+				envFrom[i] = *converted
+			}
+		}
+	}
+
+	// Convert FilesFrom slice
+	var filesFrom []host.FilesFrom
+	if len(src.Container.FilesFrom) > 0 {
+		filesFrom = make([]host.FilesFrom, len(src.Container.FilesFrom))
+		for i, ff := range src.Container.FilesFrom {
+			if converted := ff.toHost(); converted != nil {
+				filesFrom[i] = *converted
+			}
+		}
+	}
+
+	// Convert AdditionalPorts slice
+	var additionalPorts []host.InternalPort
+	if len(src.Container.AdditionalPorts) > 0 {
+		additionalPorts = make([]host.InternalPort, len(src.Container.AdditionalPorts))
+		for i, ap := range src.Container.AdditionalPorts {
+			if converted := ap.toHost(); converted != nil {
+				additionalPorts[i] = *converted
+			}
+		}
+	}
+
+	return host.SKIPJobSpec{
+		Job:             src.Job.toHost(),
+		Cron:            src.Cron.toHost(),
+		IstioSettings:   src.IstioSettings.toHost(),
+		Prometheus:      src.Prometheus.toHost(),
+		Image:           src.Container.Image,
+		Priority:        src.Container.Priority,
+		Command:         src.Container.Command,
+		Resources:       src.Container.Resources.toHost(),
+		Env:             src.Container.Env,
+		EnvFrom:         envFrom,
+		FilesFrom:       filesFrom,
+		AdditionalPorts: additionalPorts,
+		Liveness:        src.Container.Liveness.toHost(),
+		Readiness:       src.Container.Readiness.toHost(),
+		Startup:         src.Container.Startup.toHost(),
+		AccessPolicy:    src.Container.AccessPolicy.toHost(),
+		GCP:             src.Container.GCP.toHost(),
+		RestartPolicy:   src.Container.RestartPolicy,
+		PodSettings:     src.Container.PodSettings.toHost(),
+	}
 }
 
 // +kubebuilder:object:generate=true
@@ -167,6 +238,15 @@ type JobSettings struct {
 	TTLSecondsAfterFinished *int32 `json:"ttlSecondsAfterFinished,omitempty"`
 }
 
+func (src *JobSettings) toHost() *host.JobSettings {
+	return &host.JobSettings{
+		ActiveDeadlineSeconds:   src.ActiveDeadlineSeconds,
+		BackoffLimit:            src.BackoffLimit,
+		Suspend:                 src.Suspend,
+		TTLSecondsAfterFinished: src.TTLSecondsAfterFinished,
+	}
+}
+
 // +kubebuilder:object:generate=true
 type CronSettings struct {
 	// Denotes how Kubernetes should react to multiple instances of the Job being started at the same time.
@@ -203,6 +283,16 @@ type CronSettings struct {
 	//
 	//+kubebuilder:validation:Optional
 	Suspend *bool `json:"suspend,omitempty"`
+}
+
+func (src *CronSettings) toHost() *host.CronSettings {
+	return &host.CronSettings{
+		ConcurrencyPolicy:       src.ConcurrencyPolicy,
+		Schedule:                src.Schedule,
+		TimeZone:                src.TimeZone,
+		StartingDeadlineSeconds: src.StartingDeadlineSeconds,
+		Suspend:                 src.Suspend,
+	}
 }
 
 func (skipJob *SKIPJob) KindPostFixedName() string {

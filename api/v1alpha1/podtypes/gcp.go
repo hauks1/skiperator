@@ -1,5 +1,7 @@
 package podtypes
 
+import host "github.com/kartverket/skiperator/api/v1beta1/podtypes"
+
 // GCP
 //
 // Configuration for interacting with Google Cloud Platform
@@ -22,6 +24,13 @@ type GCP struct {
 	CloudSQLProxy *CloudSQLProxySettings `json:"cloudSqlProxy,omitempty"`
 }
 
+func (src *GCP) toHost() *host.GCP {
+	return &host.GCP{
+		Auth:          src.Auth.toHost(),
+		CloudSQLProxy: src.CloudSQLProxy.toHost(),
+	}
+}
+
 // Auth
 //
 // Configuration for authenticating a Pod with Google Cloud Platform
@@ -31,6 +40,12 @@ type Auth struct {
 	//
 	//+kubebuilder:validation:Required
 	ServiceAccount string `json:"serviceAccount"`
+}
+
+func (src *Auth) toHost() *host.Auth {
+	return &host.Auth{
+		ServiceAccount: src.ServiceAccount,
+	}
 }
 
 type CloudSQLProxySettings struct {
@@ -55,4 +70,14 @@ type CloudSQLProxySettings struct {
 	//+kubebuilder:validation:Optional
 	//+kubebuilder:default:=false
 	PublicIP bool `json:"publicIP,omitempty"`
+}
+
+func (src *CloudSQLProxySettings) toHost() *host.CloudSQLProxySettings {
+	return &host.CloudSQLProxySettings{
+		ConnectionName: src.ConnectionName,
+		ServiceAccount: src.ServiceAccount,
+		IP:             src.IP,
+		Version:        src.Version,
+		PublicIP:       src.PublicIP,
+	}
 }

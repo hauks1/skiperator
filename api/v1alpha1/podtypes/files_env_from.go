@@ -1,5 +1,7 @@
 package podtypes
 
+import host "github.com/kartverket/skiperator/api/v1beta1/podtypes"
+
 type EnvFrom struct {
 	// Name of Kubernetes ConfigMap in which the deployment should mount environment variables from. Must be in the same namespace as the Application
 	//
@@ -10,6 +12,13 @@ type EnvFrom struct {
 	//
 	//+kubebuilder:validation:Optional
 	Secret string `json:"secret,omitempty"`
+}
+
+func (src *EnvFrom) toHost() *host.EnvFrom {
+	return &host.EnvFrom{
+		ConfigMap: src.ConfigMap,
+		Secret:    src.Secret,
+	}
 }
 
 // FilesFrom
@@ -42,4 +51,15 @@ type FilesFrom struct {
 	// +kubebuilder:validation:max=777
 	// +kubebuilder:validation:Optional
 	DefaultMode int `json:"defaultMode,omitempty"`
+}
+
+func (src *FilesFrom) toHost() *host.FilesFrom {
+	return &host.FilesFrom{
+		MountPath:             src.MountPath,
+		ConfigMap:             src.ConfigMap,
+		Secret:                src.Secret,
+		EmptyDir:              src.EmptyDir,
+		PersistentVolumeClaim: src.PersistentVolumeClaim,
+		DefaultMode:           src.DefaultMode,
+	}
 }

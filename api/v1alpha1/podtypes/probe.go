@@ -1,6 +1,9 @@
 package podtypes
 
-import "k8s.io/apimachinery/pkg/util/intstr"
+import (
+	host "github.com/kartverket/skiperator/api/v1beta1/podtypes"
+	"k8s.io/apimachinery/pkg/util/intstr"
+)
 
 // Probe
 //
@@ -49,4 +52,16 @@ type Probe struct {
 	//+kubebuilder:default=3
 	//+kubebuilder:validation:Optional
 	FailureThreshold int32 `json:"failureThreshold,omitempty"`
+}
+
+func (src *Probe) toHost() *host.Probe {
+	return &host.Probe{
+		Port:             src.Port,
+		Path:             src.Path,
+		InitialDelay:     src.InitialDelay,
+		Timeout:          src.Timeout,
+		Period:           src.Period,
+		SuccessThreshold: src.SuccessThreshold,
+		FailureThreshold: src.FailureThreshold,
+	}
 }
