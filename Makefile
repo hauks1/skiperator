@@ -42,7 +42,7 @@ run-local: build install-skiperator
 	./bin/skiperator
 
 .PHONY: setup-local
-setup-local: kind-cluster install-istio install-cert-manager install-prometheus-crds install-digdirator-crds install-skiperator
+setup-local: kind-cluster install-istio install-cert-manager install-prometheus-crds install-digdirator-crds install-skiperator install-argocd
 	@echo "Cluster $(SKIPERATOR_CONTEXT) is setup"
 
 
@@ -59,6 +59,12 @@ kind-cluster: check-kind
 
 
 #### SKIPERATOR DEPENDENCIES ####
+.PHONY: install-argocd
+install-argocd:
+	@echo "Installing ArgoCD"
+	@kubectl create namespace argocd
+	@kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
+	@kubectl port-forward svc/argocd-server -n argocd 8080:443 &
 
 .PHONY: install-istio
 install-istio:
