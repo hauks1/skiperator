@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
+	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -11,14 +13,11 @@ import (
 	"github.com/kartverket/skiperator/api/v1alpha1"
 	"github.com/kartverket/skiperator/api/v1beta1"
 	"github.com/kartverket/skiperator/internal/config"
-	"github.com/kartverket/skiperator/pkg/resourcegenerator/imagepullsecret"
-	"github.com/kartverket/skiperator/pkg/resourcegenerator/networkpolicy/defaultdeny"
-	"github.com/kartverket/skiperator/pkg/util"
-	"k8s.io/apimachinery/pkg/types"
-	"sigs.k8s.io/controller-runtime/pkg/client"
-
 	"github.com/kartverket/skiperator/internal/controllers"
 	"github.com/kartverket/skiperator/internal/controllers/common"
+	webhookv1beta1 "github.com/kartverket/skiperator/internal/webhook"
+	"github.com/kartverket/skiperator/pkg/envconfig"
+	"github.com/kartverket/skiperator/pkg/flags"
 	"github.com/kartverket/skiperator/pkg/k8sfeatures"
 	"github.com/kartverket/skiperator/pkg/log"
 	"github.com/kartverket/skiperator/pkg/metrics/usage"
@@ -41,7 +40,7 @@ import (
 	// to ensure that exec-entrypoint and run can make use of them.
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 
-	realzap "go.uber.org/zap"
+	"github.com/caarlos0/env/v11"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -75,53 +74,40 @@ func init() {
 }
 
 func main() {
-	encCfg := realzap.NewProductionEncoderConfig()
-	encCfg.EncodeTime = zapcore.ISO8601TimeEncoder
+	leaderElection := flag.Bool("l", false, "enable leader election")
+	leaderElectionNamespace := flag.String("ln", "", "leader election namespace")
+	isDeployment := flag.Bool("d", false, "is deployed to a real cluster")
+	logLevel := flag.String("e", "debug", "Error level used for logs. Default debug. Possible values: debug, info, warn, error, dpanic, panic.")
+	concurrentReconciles := flag.Int("c", 1, "number of concurrent reconciles for application controller")
+	webhookCertDir := flag.String("webhook-cert-dir", "", "Directory containing webhook TLS certificate and key. If empty, webhook will use self-signed certificates.")
+	webhookCertName := flag.String("webhook-cert-name", "tls.crt", "Name of the webhook TLS certificate file")
+	webhookKeyName := flag.String("webhook-key-name", "tls.key", "Name of the webhook TLS key file")
+	webhookHost := flag.String("webhook-host", "", "Host to bind webhook server to. Use 0.0.0.0 to bind to all interfaces for local kind development.")
+	webhookPort := flag.Int("webhook-port", 9443, "Port for webhook server to listen on")
+	flag.Parse()
 
-	// Set a temporary logger for the config loading, the real logger is initialized later with values from config
+	// Providing multiple image pull tokens as flags are painful, so instead we parse them as env variables
+
+	parsedLogLevel, _ := zapcore.ParseLevel(*logLevel)
+
+	//TODO use zap directly so we get more loglevels
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&zap.Options{
-		Encoder:     zapcore.NewJSONEncoder(encCfg),
-		Development: true,
-		Level:       zapcore.InfoLevel,
-		DestWriter:  os.Stdout,
-	})))
-
-	kubeconfig := ctrl.GetConfigOrDie()
-
-	configClient, err := client.New(kubeconfig, client.Options{Scheme: scheme})
-	if err != nil {
-		setupLog.Error(err, "could not create config check client")
-		os.Exit(1)
-	}
-
-	// If loading configuration takes over 15 seconds, something is seriously wrong.
-	// We should let skiperator crash and let a new process attempt to load the configuration again.
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-
-	// load global config. exit on error
-	err = config.LoadConfig(ctx, configClient)
-	if err != nil {
-		setupLog.Error(err, "could not load global config")
-		os.Exit(1)
-	} else {
-		setupLog.Info("Successfully loaded global config")
-	}
-
-	activeConfig := config.GetActiveConfig()
-
-	setupLog.Info(fmt.Sprintf("Running skiperator %s (commit %s), with %d concurrent reconciles", Version, Commit, activeConfig.ConcurrentReconciles))
-
-	parsedLogLevel, _ := zapcore.ParseLevel(activeConfig.LogLevel)
-
-	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&zap.Options{
-		Encoder:     zapcore.NewJSONEncoder(encCfg),
-		Development: !activeConfig.IsDeployment,
+		Development: !*isDeployment,
 		Level:       parsedLogLevel,
 		DestWriter:  os.Stdout,
 	})))
 
-	if !activeConfig.IsDeployment && !strings.Contains(kubeconfig.Host, "https://127.0.0.1") {
+	var cfg envconfig.Vars
+	if parseErr := env.Parse(&cfg); parseErr != nil {
+		setupLog.Error(parseErr, "Failed to parse config")
+		os.Exit(1)
+	}
+
+	setupLog.Info(fmt.Sprintf("Running skiperator %s (commit %s), with %d concurrent reconciles", Version, Commit, *concurrentReconciles))
+
+	kubeconfig := ctrl.GetConfigOrDie()
+
+	if !*isDeployment && !strings.Contains(kubeconfig.Host, "https://127.0.0.1") {
 		setupLog.Info("Tried to start skiperator with non-local kubecontext. Exiting to prevent havoc.")
 		os.Exit(1)
 	} else {
@@ -131,8 +117,7 @@ func main() {
 	detectK8sVersion(kubeconfig)
 
 	pprofBindAddr := ""
-
-	if activeConfig.EnableProfiling {
+	if flags.FeatureFlags.EnableProfiling {
 		pprofBindAddr = ":8281"
 	}
 	var metricsAddr string
@@ -215,8 +200,8 @@ func main() {
 	mgr, err := ctrl.NewManager(kubeconfig, ctrl.Options{
 		Scheme:                  scheme,
 		HealthProbeBindAddress:  ":8081",
-		LeaderElection:          activeConfig.LeaderElection,
-		LeaderElectionNamespace: activeConfig.LeaderElectionNamespace,
+		LeaderElection:          *leaderElection,
+		LeaderElectionNamespace: *leaderElectionNamespace,
 		Metrics:                 metricsserver.Options{BindAddress: ":8181"},
 		LeaderElectionID:        "skiperator",
 		PprofBindAddress:        pprofBindAddr,
@@ -235,12 +220,34 @@ func main() {
 		}
 	}()
 
-	err = (&controllers.ApplicationReconciler{
-		ReconcilerBase:   common.NewFromManager(mgr, mgr.GetEventRecorderFor("application-controller")),
-		SkiperatorConfig: activeConfig,
-	}).SetupWithManager(mgr, activeConfig.ConcurrentReconciles)
-	if err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "Application")
+	// Setup webhooks first
+	if os.Getenv("ENABLE_WEBHOOKS") != "false" {
+		if err := webhookv1beta1.SetupSkipJobWebhookWithManager(mgr); err != nil {
+			setupLog.Error(err, "unable to create webhook", "webhook", "SvartSkjaif")
+			os.Exit(1)
+		}
+	}
+
+	// Add certificate watchers
+	if metricsCertWatcher != nil {
+		setupLog.Info("Adding metrics certificate watcher to manager")
+		if err := mgr.Add(metricsCertWatcher); err != nil {
+			setupLog.Error(err, "unable to add metrics certificate watcher to manager")
+			os.Exit(1)
+		}
+	}
+
+	if webhookCertWatcher != nil {
+		setupLog.Info("Adding webhook certificate watcher to manager")
+		if err := mgr.Add(webhookCertWatcher); err != nil {
+			setupLog.Error(err, "unable to add webhook certificate watcher to manager")
+			os.Exit(1)
+		}
+	}
+
+	// Setup health checks
+	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
+		setupLog.Error(err, "unable to set up health check")
 		os.Exit(1)
 	}
 	if err := mgr.AddReadyzCheck("readyz", healthz.Ping); err != nil {
@@ -248,14 +255,41 @@ func main() {
 		os.Exit(1)
 	}
 
+	configCheckClient, err := client.New(kubeconfig, client.Options{Scheme: scheme})
+	if err != nil {
+		setupLog.Error(err, "could not create config check client")
+		os.Exit(1)
+	}
+
+	// If loading configuration takes over 15 seconds, something is seriously wrong.
+	// We should let skiperator crash and let a new process attempt to load the configuration again.
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	// load global config. exit on error
+	err = config.LoadConfig(ctx, configCheckClient)
+	if err != nil {
+		setupLog.Error(err, "could not load global config")
+		os.Exit(1)
+	} else {
+		setupLog.Info("Successfully loaded global config", "config", config.GetActiveConfig())
+	}
+
+	// We need to get this configmap before initializing the manager, therefore we need a separate client for thi
+	// If the configmap is not present or otherwise misconfigured, we should not start Skiperator
+	// as this configmap contains the CIDRs for cluster nodes in order to prevent egress traffic
+	// directly from namespaces as per SKIP-1704
+
 	var skipClusterList *config.SKIPClusterList
-	if activeConfig.ClusterCIDRExclusionEnabled {
-		err = config.ValidateSKIPClusterList(&activeConfig.ClusterCIDRMap)
+	if cfg.ClusterCIDRExclusionEnabled {
+		skipClusterList, err = config.LoadSKIPClusterConfigFromConfigMap(configCheckClient)
 		if err != nil {
 			setupLog.Error(err, "could not load SKIP cluster config")
 			os.Exit(1)
-		} else {
-			skipClusterList = &activeConfig.ClusterCIDRMap
+		}
+	} else {
+		skipClusterList = &config.SKIPClusterList{
+			Clusters: []*config.SKIPCluster{},
 		}
 	}
 
@@ -269,8 +303,7 @@ func main() {
 	}
 
 	err = (&controllers.SKIPJobReconciler{
-		ReconcilerBase:   common.NewFromManager(mgr, mgr.GetEventRecorderFor("skipjob-controller")),
-		SkiperatorConfig: activeConfig,
+		ReconcilerBase: common.NewFromManager(mgr, mgr.GetEventRecorderFor("skipjob-controller")),
 	}).SetupWithManager(mgr)
 	if err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "SKIPJob")
@@ -284,32 +317,15 @@ func main() {
 		setupLog.Error(err, "unable to create controller", "controller", "Routing")
 		os.Exit(1)
 	}
-	var regSecrets []imagepullsecret.RegistryCredentialSecret
-	for _, registry := range activeConfig.RegistrySecretRefs {
-		secret, regErr := util.GetSecret(configClient, ctx, types.NamespacedName{
-			Namespace: "skiperator-system",
-			Name:      registry.SecretName,
-		})
-		if regErr != nil {
-			setupLog.Error(err, "unable to fetch registry credential secret configuration", "controller", "Namespace")
-			os.Exit(1)
-		} else {
-			regcredSecret := imagepullsecret.RegistryCredentialSecret{
-				Registry:  registry.Registry,
-				Secret:    secret,
-				SecretKey: registry.SecretKey,
-			}
-			regSecrets = append(regSecrets, regcredSecret)
-		}
-	}
-	ps, err := imagepullsecret.NewImagePullSecret(regSecrets...)
+
+	ps, err := imagepullsecret.NewImagePullSecret(cfg.RegistryCredentials...)
 	if err != nil {
 		setupLog.Error(err, "unable to create image pull secret configuration", "controller", "Namespace")
 		os.Exit(1)
 	}
-	setupLog.Info("initialized image pull secret", "controller", "Namespace", "registry-count", len(activeConfig.RegistrySecretRefs))
+	setupLog.Info("initialized image pull secret", "controller", "Namespace", "registry-count", len(cfg.RegistryCredentials))
 
-	dd, err := defaultdeny.NewDefaultDenyNetworkPolicy(skipClusterList, activeConfig.ClusterCIDRExclusionEnabled)
+	dd, err := defaultdeny.NewDefaultDenyNetworkPolicy(skipClusterList)
 	if err != nil {
 		setupLog.Error(err, "unable to create default deny network policy configuration", "controller", "Namespace")
 		os.Exit(1)
@@ -325,14 +341,10 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
-		setupLog.Error(err, "unable to set up health check")
-		os.Exit(1)
+	if flags.FeatureFlags == nil {
+		panic("something is wrong with the go runtime, panicing")
 	}
-	if err := mgr.AddReadyzCheck("readyz", healthz.Ping); err != nil {
-		setupLog.Error(err, "unable to set up ready check")
-		os.Exit(1)
-	}
+	setupLog.Info("initializing skiperator with feature flags", "features", flags.FeatureFlags)
 
 	setupLog.Info("starting manager")
 	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {

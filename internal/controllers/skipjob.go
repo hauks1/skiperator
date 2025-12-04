@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/kartverket/skiperator/internal/config"
 	"github.com/kartverket/skiperator/pkg/resourceprocessor"
 	"github.com/kartverket/skiperator/pkg/resourceschemas"
 
@@ -55,7 +54,8 @@ const (
 // leave an empty line over this comment
 type SKIPJobReconciler struct {
 	common.ReconcilerBase
-	config.SkiperatorConfig
+	client.Client
+	Scheme *runtime.Scheme
 }
 
 // TODO Watch applications that are using dynamic port allocation
@@ -157,8 +157,12 @@ func (r *SKIPJobReconciler) Reconcile(ctx context.Context, req reconcile.Request
 	r.SetProgressingState(ctx, skipJob, fmt.Sprintf("SKIPJob %v has started reconciliation loop", skipJob.Name))
 
 	istioEnabled := r.IsIstioEnabledForNamespace(ctx, skipJob.Namespace)
+	identityConfigMap, err := r.GetIdentityConfigMap(ctx)
+	if err != nil {
+		rLog.Error(err, "can't find identity config map")
+	} //TODO Error state?
 
-	reconciliation := NewJobReconciliation(ctx, skipJob, rLog, istioEnabled, r.GetRestConfig(), r.SkiperatorConfig)
+	reconciliation := NewJobReconciliation(ctx, skipJob, rLog, istioEnabled, r.GetRestConfig(), identityConfigMap)
 
 	resourceGeneration := []reconciliationFunc{
 		serviceaccount.Generate,
